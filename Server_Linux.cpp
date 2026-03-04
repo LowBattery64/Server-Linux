@@ -189,9 +189,8 @@ void broadcast(const MessageHeader& header,
                const std::vector<char>& data,
                int sender) {
 
-    std::lock_guard<std::mutex> lock(sMutex);
-
-    for (auto& c : s) {
+    std::lock_guard<std::mutex> lock(clientsMutex);
+    for (auto& c : clients) {
         if (c.socket == sender) continue;
         try {
             sendAll(c.socket, (char*)&header, sizeof(header));
@@ -206,7 +205,7 @@ void broadcast(const MessageHeader& header,
 
 void handleClient(int clientSocket) {
 
-    std::string clientId = getClientId(clientSocket);
+    std::string clientId = getId(clientSocket);
     std::string username = "Unknown";
     std::string clientColor;
 
@@ -585,7 +584,7 @@ void runAcceptLoop() {
             break;
         }
 
-        std::string id = getClientId(client);
+        std::string id = getId(client);
 
         Client newClient;
         newClient.socket = client;
