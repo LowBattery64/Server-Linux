@@ -14,6 +14,7 @@
 #include <sstream>
 #include <fstream>
 #include <limits>
+#include <iomanip>
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -144,10 +145,10 @@ void recvAll(int sock, char* data, int size) {
     }
 }
 
-std::string getClientId(int clientSocket) {
+std::string getId(int Socket) {
     sockaddr_in addr{};
     socklen_t len = sizeof(addr);
-    if (getpeername(clientSocket, (sockaddr*)&addr, &len) == 0) {
+    if (getpeername(Socket, (sockaddr*)&addr, &len) == 0) {
         return std::string(inet_ntoa(addr.sin_addr)) + ":" +
                std::to_string(ntohs(addr.sin_port));
     }
@@ -158,9 +159,9 @@ std::string getClientId(int clientSocket) {
 // COLOR MANAGEMENT
 // ============================================================
 
-int assignColorIndex(const std::string& clientId) {
-    if (usedColors.count(clientId))
-        return usedColors[clientId];
+int assignColorIndex(const std::string& Id) {
+    if (usedColors.count(Id))
+        return usedColors[Id];
 
     std::vector<bool> used(colorPool.size(), false);
     for (auto& p : usedColors)
@@ -169,15 +170,15 @@ int assignColorIndex(const std::string& clientId) {
 
     for (int i = 0; i < (int)colorPool.size(); i++)
         if (!used[i]) {
-            usedColors[clientId] = i;
+            usedColors[Id] = i;
             return i;
         }
 
     return -1;
 }
 
-void releaseColorIndex(const std::string& clientId) {
-    usedColors.erase(clientId);
+void releaseColorIndex(const std::string& Id) {
+    usedColors.erase(Id);
 }
 
 // ============================================================
@@ -188,9 +189,9 @@ void broadcast(const MessageHeader& header,
                const std::vector<char>& data,
                int sender) {
 
-    std::lock_guard<std::mutex> lock(clientsMutex);
+    std::lock_guard<std::mutex> lock(sMutex);
 
-    for (auto& c : clients) {
+    for (auto& c : s) {
         if (c.socket == sender) continue;
         try {
             sendAll(c.socket, (char*)&header, sizeof(header));
@@ -200,7 +201,7 @@ void broadcast(const MessageHeader& header,
 }
 
 // ============================================================
-// CLIENT THREAD
+//  THREAD
 // ============================================================
 
 void handleClient(int clientSocket) {
@@ -273,7 +274,7 @@ void handleClient(int clientSocket) {
 
         broadcast(outHeader, outData, clientSocket);
     }
-
+ 
     else if (header.type == static_cast<uint32_t>(MessageType::LogRequest)) {
 
         std::string request(msgData.begin(), msgData.end());
@@ -329,6 +330,7 @@ void handleClient(int clientSocket) {
         break;
     }
 }
+    }
 
 // ============================================================
 // COMMAND THREAD
