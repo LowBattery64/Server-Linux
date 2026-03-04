@@ -29,7 +29,9 @@
 enum class MessageType : uint32_t {
     Text = 1,
     Connect = 2,
-    Disconnect = 3
+    Disconnect = 3,
+    LogRequest = 4,
+    LogResponse = 5
 };
 
 struct MessageHeader {
@@ -69,6 +71,9 @@ int serverSock = -1;
 // ===== LOGGING =====
 std::mutex logMutex;
 std::ofstream logFile;
+std::vector<std::string> logBuffer;
+std::vector<std::string> warningBuffer;
+std::mutex logBufferMutex;
 
 
 // ===== MONITORING SETTINGS =====
@@ -93,11 +98,21 @@ std::string getSystemTimeFull() {
 
 void logEvent(const std::string& text) {
     std::lock_guard<std::mutex> lock(logMutex);
-    if (logFile.is_open())
-        logFile << "[" << getSystemTimeFull() << "] "
-                << text << std::endl;
-}
 
+    std::string full =
+        "[" + getSystemTimeFull() + "] " + text;
+
+    if (logFile.is_open())
+        logFile << full << std::endl;
+
+    {
+        std::lock_guard<std::mutex> bufLock(logBufferMutex);
+        logBuffer.push_back(full);
+
+        if (text.find("[WARNING]") != std::string::npos)
+            warningBuffer.push_back(full);
+    }
+}
 std::string getCurrentTime() {
     time_t now = time(nullptr);
     struct tm timeinfo{};
@@ -225,57 +240,95 @@ void handleClient(int clientSocket) {
         logEvent("Client " + clientId +
                  " joined as '" + username + "'");
 
-        while (serverRunning) {
+ while (serverRunning) {
 
-            recvAll(clientSocket, (char*)&header, sizeof(header));
-            if (header.size > 1024 * 1024) break;
+    recvAll(clientSocket, (char*)&header, sizeof(header));
+    if (header.size > 1024 * 1024) break;
 
-            std::vector<char> msgData(header.size);
-            recvAll(clientSocket, msgData.data(), header.size);
+    std::vector<char> msgData(header.size);
+    recvAll(clientSocket, msgData.data(), header.size);
 
-            if (header.type == MessageType::Text) {
+    if (header.type == MessageType::Text) {
 
-                std::string message(msgData.begin(), msgData.end());
+        std::string message(msgData.begin(), msgData.end());
 
-                std::cout << clientColor
-                          << "[" << username << "] "
-                          << message
-                          << RESET << "\n";
+        std::cout << clientColor
+                  << "[" << username << "] "
+                  << message
+                  << RESET << "\n";
 
-                logEvent("[" + username + "] " + message);
+        logEvent("[" + username + "] " + message);
 
-                std::string coloredMessage =
-                    clientColor + message + RESET;
+        std::string coloredMessage =
+            clientColor + message + RESET;
 
-                MessageHeader outHeader{
-                    MessageType::Text,
-                    (uint32_t)coloredMessage.size()
-                };
+        MessageHeader outHeader{
+            MessageType::Text,
+            (uint32_t)coloredMessage.size()
+        };
 
-                std::vector<char> outData(
-                    coloredMessage.begin(),
-                    coloredMessage.end());
+        std::vector<char> outData(
+            coloredMessage.begin(),
+            coloredMessage.end());
 
-                broadcast(outHeader, outData, clientSocket);
+        broadcast(outHeader, outData, clientSocket);
+    }
+
+    else if (header.type == MessageType::LogRequest) {
+
+        std::string request(msgData.begin(), msgData.end());
+
+        std::vector<std::string> result;
+
+        {
+            std::lock_guard<std::mutex> lock(logBufferMutex);
+
+            if (request == "ALL") {
+                result = logBuffer;
             }
-            else if (header.type == MessageType::Disconnect) {
-                break;
+            else if (request == "WARNINGS") {
+                result = warningBuffer;
+            }
+            else if (request.rfind("LAST ", 0) == 0) {
+
+                int minutes = std::stoi(request.substr(5));
+                time_t now = time(nullptr);
+
+                for (auto& line : logBuffer) {
+
+                    std::tm tm{};
+                    std::istringstream ss(line.substr(1, 19));
+                    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+
+                    time_t logTime = mktime(&tm);
+
+                    if (difftime(now, logTime) <= minutes * 60)
+                        result.push_back(line);
+                }
             }
         }
+
+        std::ostringstream joined;
+        for (auto& l : result)
+            joined << l << "\n";
+
+        std::string output = joined.str();
+
+        MessageHeader outHeader{
+            MessageType::LogResponse,
+            (uint32_t)output.size()
+        };
+
+        sendAll(clientSocket, (char*)&outHeader, sizeof(outHeader));
+        sendAll(clientSocket, output.data(), output.size());
     }
-    catch (...) {}
 
-    logEvent("Client " + clientId +
-             " ('" + username + "') disconnected");
+    // =============================
+    // 🔼 ДОБАВЛЕНИЕ ЗАКОНЧИЛОСЬ
+    // =============================
 
-    close(clientSocket);
-
-    {
-        std::lock_guard<std::mutex> lock(clientsMutex);
-        clients.erase(std::remove_if(clients.begin(), clients.end(),
-            [clientSocket](Client& c){ return c.socket == clientSocket; }),
-            clients.end());
-        releaseColorIndex(clientId);
+    else if (header.type == MessageType::Disconnect) {
+        break;
     }
 }
 
