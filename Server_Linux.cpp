@@ -35,7 +35,7 @@ enum class MessageType : uint32_t {
 };
 
 struct MessageHeader {
-    MessageType type;
+    uint32_t type;
     uint32_t size;
 };
 
@@ -213,7 +213,7 @@ void handleClient(int clientSocket) {
         MessageHeader header{};
         recvAll(clientSocket, (char*)&header, sizeof(header));
 
-        if (header.type != MessageType::Connect || header.size > 256) {
+        if (header.type != static_cast<uint32_t>(MessageType::Connect) || header.size > 256) {
             close(clientSocket);
             return;
         }
@@ -248,7 +248,7 @@ void handleClient(int clientSocket) {
     std::vector<char> msgData(header.size);
     recvAll(clientSocket, msgData.data(), header.size);
 
-    if (header.type == MessageType::Text) {
+    if (header.type == static_cast<uint32_t>(MessageType::Text)) {
 
         std::string message(msgData.begin(), msgData.end());
 
@@ -263,7 +263,7 @@ void handleClient(int clientSocket) {
             clientColor + message + RESET;
 
         MessageHeader outHeader{
-            MessageType::Text,
+            static_cast<uint32_t>(MessageType::Text),
             (uint32_t)coloredMessage.size()
         };
 
@@ -274,7 +274,7 @@ void handleClient(int clientSocket) {
         broadcast(outHeader, outData, clientSocket);
     }
 
-    else if (header.type == MessageType::LogRequest) {
+    else if (header.type == static_cast<uint32_t>(MessageType::LogRequest)) {
 
         std::string request(msgData.begin(), msgData.end());
 
@@ -315,19 +315,17 @@ void handleClient(int clientSocket) {
         std::string output = joined.str();
 
         MessageHeader outHeader{
-            MessageType::LogResponse,
-            (uint32_t)output.size()
-        };
+           static_cast<uint32_t>(MessageType::LogResponse),
+           (uint32_t)output.size()
+       };
 
         sendAll(clientSocket, (char*)&outHeader, sizeof(outHeader));
         sendAll(clientSocket, output.data(), output.size());
     }
 
-    // =============================
-    // 🔼 ДОБАВЛЕНИЕ ЗАКОНЧИЛОСЬ
-    // =============================
 
-    else if (header.type == MessageType::Disconnect) {
+
+    else if (header.type == static_cast<uint32_t>(MessageType::Disconnect)) {
         break;
     }
 }
@@ -537,8 +535,8 @@ void monitoringLoop() {
 
             // отправка всем клиентам
             MessageHeader header{
-                MessageType::Text,
-                (uint32_t)fullMsg.size()
+               static_cast<uint32_t>(MessageType::Text),
+               (uint32_t)fullMsg.size()
             };
 
             std::vector<char> data(fullMsg.begin(), fullMsg.end());
