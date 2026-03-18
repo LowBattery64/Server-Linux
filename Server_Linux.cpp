@@ -69,18 +69,38 @@ const std::string RESET = "\033[0m";
 std::atomic<bool> serverRunning{true};
 int serverSock = -1;
 
+struct SensorRule {
+
+    std::string name;
+    double limit;
+    bool greater; // true = больше лимита плохо
+};
+
+
+std::map<std::string, SensorRule> sensorRules = {
+
+    {"TEMP", {"TEMP", 40, true}},
+    {"HUM",  {"HUM",  100, true}},
+    {"LIGHT", {"LIGHT", 1200, true}}
+
+};
+
 // ===== LOGGING =====
 std::mutex logMutex;
 std::ofstream logFile;
+std::ofstream boardLog;
+std::ofstream sensorLog;
 std::vector<std::string> logBuffer;
 std::vector<std::string> warningBuffer;
 std::mutex logBufferMutex;
+
 
 
 // ===== MONITORING SETTINGS =====
 constexpr int MONITOR_INTERVAL_SEC = 10;      // опрос раз в 10 секунд
 constexpr double CPU_TEMP_LIMIT = 70.0;      // порог температуры
 constexpr int RAM_LIMIT_PERCENT = 40;       // порог RAM
+
 // ============================================================
 // TIME UTILS
 // ============================================================
@@ -155,6 +175,22 @@ std::string getId(int Socket) {
     return "unknown";
 }
 
+
+std::string readLine(int fd) {
+
+    std::string result;
+    char c;
+
+    while (read(fd, &c, 1) == 1) {
+
+        if (c == '\n')
+            break;
+
+        result += c;
+    }
+
+    return result;
+}
 // ============================================================
 // COLOR MANAGEMENT
 // ============================================================
@@ -199,6 +235,23 @@ void broadcast(const MessageHeader& header,
     }
 }
 
+
+std::vector<std::string> readLogFile(const std::string& filename) {
+
+    std::vector<std::string> lines;
+    std::ifstream file(filename);
+
+    if (!file.is_open())
+        return lines;
+
+    std::string line;
+
+    while (std::getline(file, line)) {
+        lines.push_back(line);
+    }
+
+    return lines;
+}
 // ============================================================
 //  THREAD
 // ============================================================
@@ -277,52 +330,97 @@ void handleClient(int clientSocket) {
 
             else if (header.type == static_cast<uint32_t>(MessageType::LogRequest)) {
 
-                std::string request(msgData.begin(), msgData.end());
+          std::string request(msgData.begin(), msgData.end());
 
-                std::vector<std::string> result;
+          std::vector<std::string> result;
 
-                {
-                    std::lock_guard<std::mutex> lock(logBufferMutex);
+          if (request == "SERVER") {
+               result = readLogFile("server.log");
+          }
+          else if (request == "BOARD") {
+               result = readLogFile("board.log");
+          }
+           else if (request == "SENSOR") {
+             result = readLogFile("sensor.log");
+         }
+          else if (request == "ALL") {
 
-                    if (request == "ALL") {
-                        result = logBuffer;
-                    }
-                    else if (request == "WARNINGS") {
-                        result = warningBuffer;
-                    }
-                    else if (request.rfind("LAST ", 0) == 0) {
+    auto s1 = readLogFile("server.log");
+    auto s2 = readLogFile("board.log");
+    auto s3 = readLogFile("sensor.log");
 
-                        int minutes = std::stoi(request.substr(5));
-                        time_t now = time(nullptr);
+    result.push_back("=== SERVER LOG ===");
+    result.insert(result.end(), s1.begin(), s1.end());
 
-                        for (auto& line : logBuffer) {
+    result.push_back("=== BOARD LOG ===");
+    result.insert(result.end(), s2.begin(), s2.end());
 
-                            std::tm tm{};
-                            std::istringstream ss(line.substr(1, 19));
-                            ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+    result.push_back("=== SENSOR LOG ===");
+    result.insert(result.end(), s3.begin(), s3.end());
+}
+         else if (request == "WARNINGS") {
 
-                            time_t logTime = mktime(&tm);
+             auto s1 = readLogFile("server.log");
+             auto s2 = readLogFile("board.log");
+             auto s3 = readLogFile("sensor.log");
 
-                            if (difftime(now, logTime) <= minutes * 60)
-                                result.push_back(line);
-                        }
-                    }
-                }
+             std::vector<std::string> all;
 
-                std::ostringstream joined;
-                for (auto& l : result)
-                    joined << l << "\n";
+             all.insert(all.end(), s1.begin(), s1.end());
+             all.insert(all.end(), s2.begin(), s2.end());
+             all.insert(all.end(), s3.begin(), s3.end());
 
-                std::string output = joined.str();
+             for (auto& line : all) {
+                 if (line.find("WARNING") != std::string::npos)
+                      result.push_back(line);
+             }
+         }
+         else if (request.rfind("LAST ", 0) == 0) {
 
-                MessageHeader outHeader{
-                   static_cast<uint32_t>(MessageType::LogResponse),
-                   (uint32_t)output.size()
-               };
+              int minutes = std::stoi(request.substr(5));
+              time_t now = time(nullptr);
 
-                sendAll(clientSocket, (char*)&outHeader, sizeof(outHeader));
-                sendAll(clientSocket, output.data(), output.size());
-            }
+              auto s1 = readLogFile("server.log");
+              auto s2 = readLogFile("board.log");
+              auto s3 = readLogFile("sensor.log");
+
+             std::vector<std::string> all;
+
+              all.insert(all.end(), s1.begin(), s1.end());
+              all.insert(all.end(), s2.begin(), s2.end());
+              all.insert(all.end(), s3.begin(), s3.end());
+
+             for (auto& line : all) {
+
+                 if (line.size() < 20)
+                     continue;
+
+                 std::tm tm{};
+                 std::istringstream ss(line.substr(1, 19));
+                ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+
+                 time_t logTime = mktime(&tm);
+
+                 if (difftime(now, logTime) <= minutes * 60)
+                     result.push_back(line);
+              }
+         }
+
+          std::ostringstream joined;
+
+         for (auto& l : result)
+              joined << l << "\n";
+
+         std::string output = joined.str();
+
+         MessageHeader outHeader{
+             static_cast<uint32_t>(MessageType::LogResponse),
+              (uint32_t)output.size()
+          };
+
+          sendAll(clientSocket, (char*)&outHeader, sizeof(outHeader));
+          sendAll(clientSocket, output.data(), output.size());
+      }
 
             else if (header.type == static_cast<uint32_t>(MessageType::Disconnect)) {
                 break;
@@ -527,6 +625,9 @@ void monitoringLoop() {
                 << "% | Uptime: " << uptime;
 
         logEvent(logLine.str());
+        if (boardLog.is_open())
+            boardLog << "[" << getSystemTimeFull() << "] "
+                << logLine.str() << std::endl;
 
         // ===== Проверка порогов =====
         bool warning = false;
@@ -562,6 +663,145 @@ void monitoringLoop() {
         std::this_thread::sleep_for(
             std::chrono::seconds(MONITOR_INTERVAL_SEC));
     }
+}
+
+int openSerial(const std::string& device) {
+
+    int fd = open(device.c_str(), O_RDWR | O_NOCTTY);
+
+    if (fd < 0)
+        throw std::runtime_error("Cannot open serial");
+
+    return fd;
+}
+
+// ============================================================
+// SENSOR THREAD
+// ============================================================
+
+void processSensorValue(const std::string& name, double value)
+{
+    if (!sensorRules.count(name))
+        return;
+
+    auto rule = sensorRules[name];
+
+    bool warning = false;
+
+    if (rule.greater && value > rule.limit)
+        warning = true;
+
+    if (!rule.greater && value < rule.limit)
+        warning = true;
+
+    if (warning)
+    {
+        std::string msg =
+        "[WARNING] SENSOR | " + name +
+        " LIMIT (" + std::to_string(value) + ")";
+
+        std::cout << "\033[31m" << msg << RESET << "\n";
+        logEvent(msg);
+
+        MessageHeader header{
+        static_cast<uint32_t>(MessageType::Text),
+        (uint32_t)msg.size()
+        };
+
+        std::vector<char> data(msg.begin(), msg.end());
+        broadcast(header, data, -1);
+    }
+}
+
+
+void parseSensorLine(const std::string& line)
+{
+    std::istringstream ss(line);
+    std::string token;
+
+    while (ss >> token)
+    {
+        auto pos = token.find(':');
+        if (pos == std::string::npos)
+            continue;
+
+        std::string name = token.substr(0, pos);
+        double value = std::stod(token.substr(pos + 1));
+
+        processSensorValue(name, value);
+    }
+}
+
+
+void sensorLoop() {
+
+    int serial = -1;
+
+    // ===== SENSOR SIMULATION (for testing without Arduino) =====
+    bool simulateSensors = true;// поменять на true для включения тестового режима
+
+    if (simulateSensors) {
+
+        while (serverRunning) {
+
+            std::ostringstream fake;
+            int temp = 20 + rand() % 10;        // температура 20-29°C
+            int humidity = 40 + rand() % 20;    // влажность 40-59%
+            int light = 300 + rand() % 900;   // 300–1200
+
+            fake << "TEMP:" << temp
+                    << " HUM:" << humidity
+                    << " LIGHT:" << light;
+
+            std::string full =
+                "[" + getSystemTimeFull() + "] SENSOR | " + fake.str();
+
+            logEvent(full);
+
+            parseSensorLine(fake.str());
+
+            if (sensorLog.is_open())
+                sensorLog << full << std::endl;
+
+            std::this_thread::sleep_for(std::chrono::seconds(MONITOR_INTERVAL_SEC));
+        }
+
+        return;
+    }
+
+    // Ждём подключение Arduino
+    while (serial < 0 && serverRunning) {
+
+        serial = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY);
+
+        if (serial < 0) {
+            std::cerr << "Waiting for Arduino on /dev/ttyUSB0...\n";
+            std::this_thread::sleep_for(std::chrono::seconds(MONITOR_INTERVAL_SEC));
+        }
+    }
+
+    if (serial < 0)
+        return;
+
+    std::cout << "Arduino connected\n";
+
+    while (serverRunning) {
+
+        std::string line = readLine(serial);
+
+        if (line.empty())
+            continue;
+
+        std::string full =
+            "[" + getSystemTimeFull() + "] SENSOR | " + line;
+
+        logEvent(full);
+
+        // Парсинг данных от Arduino
+       parseSensorLine(line);
+}
+
+    close(serial);
 }
 // ============================================================
 // ACCEPT LOOP
@@ -619,6 +859,8 @@ void initializeServer() {
 
     // Логирование
     logFile.open("server.log", std::ios::app);
+    boardLog.open("board.log", std::ios::app);
+    sensorLog.open("sensor.log", std::ios::app);
     logEvent("=== Server started ===");
 
     // Создание сокета
@@ -644,6 +886,8 @@ void shutdownServer(std::thread& cmdThread) {
 
     logEvent("=== Server stopped ===");
     logFile.close();
+    boardLog.close();
+    sensorLog.close();
 
     close(serverSock);
 }
@@ -657,14 +901,19 @@ int main() {
 
     printCommands();
 
+    srand(time(nullptr));
+
     std::thread cmdThread(commandHandler);
     std::thread monitorThread(monitoringLoop);
+    std::thread sensorThread(sensorLoop);
 
     runAcceptLoop();
 
     if (monitorThread.joinable())
          monitorThread.join();
 
+    if (sensorThread.joinable())
+    sensorThread.join();
     shutdownServer(cmdThread);
 
     return 0;
