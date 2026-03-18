@@ -79,9 +79,9 @@ struct SensorRule {
 
 std::map<std::string, SensorRule> sensorRules = {
 
-    {"TEMP", {"TEMP", 40, true}},
-    {"HUM",  {"HUM",  100, true}},
-    {"LIGHT", {"LIGHT", 1200, true}}
+    {"TEMP", {"TEMP", 30, true}},
+    {"HUM",  {"HUM",  80, true}},
+    {"LIGHT", {"LIGHT", 1000, true}}
 
 };
 
