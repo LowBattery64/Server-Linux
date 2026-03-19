@@ -831,7 +831,7 @@ void sensorLoop() {
         // ===== Подключение =====
         if (serial < 0) {
 
-            serial = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY | O_NONBLOCK);
+            serial = open("/dev/ttyACM0", O_RDWR | O_NOCTTY | O_NONBLOCK);
 
             if (serial < 0) {
                 std::cerr << "Waiting for Arduino...\n";
