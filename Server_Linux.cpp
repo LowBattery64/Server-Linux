@@ -101,7 +101,7 @@ std::mutex logBufferMutex;
 // ===== MONITORING SETTINGS =====
 constexpr int MONITOR_INTERVAL_SEC = 10;      // опрос раз в 10 секунд
 constexpr double CPU_TEMP_LIMIT = 70.0;      // порог температуры
-constexpr int RAM_LIMIT_PERCENT = 20;       // порог RAM
+constexpr int RAM_LIMIT_PERCENT = 33;       // порог RAM
 
 // ============================================================
 // TIME UTILS
