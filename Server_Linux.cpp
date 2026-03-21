@@ -81,9 +81,9 @@ struct SensorRule {
 
 std::map<std::string, SensorRule> sensorRules = {
 
-    {"TEMP", {"TEMP", 26, true}},
-    {"HUM",  {"HUM",  40, true}},
-    {"LIGHT", {"LIGHT", 410, true}}
+    {"TEMP", {"TEMP", 40, true}},
+    {"HUM",  {"HUM",  100, true}},
+    {"LIGHT", {"LIGHT", 1200, true}}
 
 };
 
@@ -101,7 +101,7 @@ std::mutex logBufferMutex;
 // ===== MONITORING SETTINGS =====
 constexpr int MONITOR_INTERVAL_SEC = 10;      // опрос раз в 10 секунд
 constexpr double CPU_TEMP_LIMIT = 70.0;      // порог температуры
-constexpr int RAM_LIMIT_PERCENT = 33;       // порог RAM
+constexpr int RAM_LIMIT_PERCENT = 20;       // порог RAM
 
 // ============================================================
 // TIME UTILS
